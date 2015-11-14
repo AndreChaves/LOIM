@@ -1,0 +1,263 @@
+module subroutines
+
+use precision_types
+use variables
+
+implicit none
+
+contains
+
+subroutine t_band() 
+  real(fkind) :: freq,tol,gama
+  complex(fkind), dimension(2,2) :: matr
+  complex(fkind) :: arg
+  integer :: j 
+  open(unit=12,file='band.dat')
+  tol=0.01 
+  freq=freq_inic
+  do j=1,max_frequency_points
+    call matrix_generator(matr,freq,j,width_mean,width_mean)
+!    call matrix_eva_air(matr,freq,j,width_mean)
+    arg=0.5*(matr(1,1)+matr(2,2))
+    if(abs(aimag(arg))<tol) then
+      if(abs(arg)<1.) then
+         gama=acos(real(arg))
+         write(12,*) freq/(2.*pi*1.D9), gama/pi
+         print*, gama
+      endif
+    endif
+    freq=freq+frequency_step
+  enddo
+end
+
+ 
+ 
+
+function generate_interface_matrix(frequency,sigma,eps1,mu1,eps2,mu2) result(transfer_matrix)
+  integer, PARAMETER :: fkind = SELECTED_REAL_KIND(15,307)
+  real(fkind),parameter :: pi=acos(-1.0)
+  complex(fkind),parameter :: I=(0.,1.) 
+  real(fkind) :: frequency,n1,n2,arg,u2,eps1,mu1,eps2,mu2
+  complex(fkind), dimension(2,2) :: transfer_matrix
+  complex(fkind) :: f,sigma,Z1,Z2
+      
+  f=0.5*sigma*speed_of_light*magnetic_permeability
+  n1=sqrt(eps1*mu1)
+  n2=sqrt(eps2*mu2)
+  arg=1.D0-(n1/n2*sin(theta))**2
+  if(arg>0) then
+    u2=sqrt(arg)
+    Z2=sqrt(eps2*mu2)/mu2*u2
+  else
+    u2=sqrt(-arg)
+    Z2=-I*sqrt(eps2*mu2)/mu2*u2  
+  endif
+  transfer_matrix(1,1)=1.-f/Z2
+  transfer_matrix(1,2)=f/Z2
+  transfer_matrix(2,1)=-f/Z2
+  transfer_matrix(2,2)=1.+f/Z2
+
+end
+
+
+function generate_propagation_matrix(frequency,width,j,layer) result(transfer_matrix)
+  integer, PARAMETER :: fkind = SELECTED_REAL_KIND(15,307)
+  real(fkind),parameter :: pi=acos(-1.0)
+  complex(fkind),parameter :: I=(0.,1.) 
+  real(fkind) :: frequency,width,dieletric_constant
+  complex(fkind), dimension(2,2) :: transfer_matrix
+  real(fkind) :: arg,u2
+  complex(fkind) :: kz,n1,n2,phi
+  logical :: layer
+  integer:: j
+  n1=eps1(j)*mu1(j)
+  n2=eps2(j)*mu2(j)
+  arg=n2-n1*sin(theta)**2
+  if(layer) then
+    if(arg>0) then
+      u2=sqrt(arg)
+      kz=frequency/speed_of_light*u2
+      transfer_matrix(1,1)=zexp(I*kz*width)
+      transfer_matrix(2,2)=zexp(-I*kz*width)
+    else
+      u2=sqrt(-arg)
+      kz=frequency/speed_of_light*u2
+      phi=kz*width
+      transfer_matrix(1,1)=zexp(-phi)
+      transfer_matrix(2,2)=zexp(phi)!cosh(kz*width)+sinh(kz*width)!dexp(kz*width)
+    endif
+  else
+     kz=frequency/speed_of_light*cdsqrt(n1)*cos(theta)
+     transfer_matrix(1,1)=zexp(I*kz*width)    
+     transfer_matrix(2,2)=zexp(-I*kz*width)    
+  endif
+  transfer_matrix(1,2)=0.
+  transfer_matrix(2,1)=0.
+end
+
+!subroutine generate_graphene_conductivity(Fermi_energy,Gamma_energy)
+!  integer :: j
+!  real(fkind) :: frequency,x,y,Fermi_energy,Gamma_energy, &
+!                 photon_energy
+! !eVs
+!  open(unit=90,file="conductivity.dat")
+!  frequency=freq_inic
+!  do j=1,max_frequency_points
+!    photon_energy=frequency*hbar
+!    !interband term
+!    x=(photon_energy-2.*Fermi_energy)/Gamma_energy
+!    y=(photon_energy+2.*Fermi_energy)/Gamma_energy
+!    conductivity(j)=sigma0*(1.+1./pi*atan(x)-1./pi*atan(y))
+!    x=((2.*Fermi_energy+photon_energy)**2+Gamma_energy**2)/((2.*Fermi_energy-photon_energy)**2+Gamma_energy**2)
+!    conductivity(j)=conductivity(j)-I*sigma0/(2.*pi)*log(x)
+!    !drude term
+!!    conductivity(j)=0.
+!    conductivity(j)=conductivity(j)+4.*sigma0*Fermi_energy/pi/(Gamma_energy-I*photon_energy)
+!!    conductivity(j)=I*aimag(conductivity(j))
+!!    conductivity(j)=I*4.*sigma0*Fermi_energy/pi/photon_energy
+!!    conductivity(j)=sigma0
+!!   conductivity(j)=0.
+!    write(90,*) frequency/(2.*pi),real(conductivity(j))/sigma0,aimag(conductivity(j))/sigma0,j
+!    frequency=frequency+frequency_step
+!  enddo
+!end
+
+subroutine interface_dgd(matrix_,j,layer)
+  complex(fkind), dimension(2,2) :: matrix_
+  complex(fkind) :: Z1,Z2,f,n1,n2,Ztemp
+  real(fkind) :: u2,arg
+  integer :: j
+  logical :: layer
+  n1=eps1(j)*mu1(j)
+  n2=eps2(j)*mu2(j)
+  arg=n2-n1*sin(theta)**2
+  if(arg>0) then
+    u2=sqrt(arg)
+    Z2=u2/mu2(j)
+  else
+    u2=sqrt(-arg)
+    Z2=I*u2/mu2(j)
+  endif
+  Z1=cdsqrt(n1)/mu1(j)*cos(theta)
+  if(layer) then
+     Ztemp=Z1
+     Z1=Z2
+     Z2=Ztemp 
+  endif 
+  f=0.5*conductivity(j)*speed_of_light*magnetic_permeability
+  matrix_(1,1)=0.5D0+0.5D0*Z1/Z2-f/Z2
+  matrix_(1,2)=0.5D0-0.5D0*Z1/Z2-f/Z2
+  matrix_(2,1)=0.5D0-0.5D0*Z1/Z2+f/Z2
+  matrix_(2,2)=0.5D0+0.5D0*Z1/Z2+f/Z2
+  
+end
+
+subroutine interface_d2gd(matrix_,mu1,mu2,eps1,eps2,theta,sigma)
+  complex(fkind), dimension(2,2) :: matrix_
+  complex(fkind) :: Z1,Z2,f,sigma,n1,n2
+  real(fkind) :: u2,theta,eps1,eps2,mu1,mu2,arg
+
+  n1=eps1*mu1
+  n2=eps2*mu2
+  arg=n2-n1*sin(theta)**2
+  if(arg>0) then
+    u2=sqrt(arg)
+    Z1=u2/mu2
+  else
+    u2=sqrt(-arg)
+    Z1=I*u2/mu2
+  endif
+  Z2=cdsqrt(n1)/mu1*cos(theta)
+  
+  f=0.5*sigma*speed_of_light*magnetic_permeability
+  matrix_(1,1)=0.5D0+0.5D0*Z1/Z2-f/Z2
+  matrix_(1,2)=0.5D0-0.5D0*Z1/Z2-f/Z2
+  matrix_(2,1)=0.5D0-0.5D0*Z1/Z2+f/Z2
+  matrix_(2,2)=0.5D0+0.5D0*Z1/Z2+f/Z2
+  
+end
+
+
+subroutine generate_layer_1()
+     integer:: j
+     do j=1,max_frequency_points
+        eps1(j)=1.D0
+        mu1(j)=1.D0
+     enddo
+end
+
+subroutine generate_layer_2()
+    integer :: j
+    real(fkind) :: we,wm,mu0,eps0,freq
+    freq=freq_inic
+    eps0=1.21D0
+    mu0=1.D0
+    we=6.D0*pi*1.D9
+    wm=6.D0*pi*1.D9
+    do j=1,max_frequency_points
+!       eps2(j)=eps0-(we/freq)**2
+!       mu2(j)=mu0-(wm/freq)**2
+       eps2(j)=3.!100.
+       mu2(j)=1.
+       freq=freq+frequency_step
+    enddo
+end
+
+function matrix_generator(matrix,frequency,j,width1,width2) result(matrix)
+  complex(fkind), dimension(2,2) :: matrix
+  complex(fkind) :: Z1,Z2,f,sigma,n1,n2,X,Y,phase_n,phase_p,cosx,sinx
+  complex(fkind) :: Aplus,Aminus,B,Cplus,Cminus,D,beta1,beta2
+  real(fkind) :: u2,arg,frequency,width1,width2
+  real(fkind) ::kz,sinal,u1
+  integer :: j
+  n1=eps1(j)*mu1(j)
+  n2=eps2(j)*mu2(j)
+  arg=n2-n1*sin(theta)**2
+  u1=sqrt(eps1(j)*mu1(j))*cos(theta)
+  u2=sqrt(abs(arg))
+  if(mode) then 
+    Z1=u1/mu1(j)!*sqrt(eps0)
+    Z2=u2/mu2(j)!*sqrt(eps0)
+    beta1=1./Z1!(u1/mu1(j))
+    beta2=1./Z2!(u2/mu2(j))
+    sinal=-1
+  else
+    Z1=u1/eps1(j)!/sqrt(eps0)
+    Z2=u2/eps2(j)!/sqrt(eps0)
+    beta1=Z1!u1/eps1(j)
+    beta2=Z2!u2/eps2(j)
+    sinal=1
+  endif
+  if(arg>0) then
+    kz=frequency/speed_of_light*u2
+    cosx=cos(kz*width2)
+    sinx=sin(kz*width2)
+  else
+    Z2=I*Z2
+    beta2=I*beta2
+    if(mode) then
+       beta2=-beta2
+    endif
+    kz=frequency/speed_of_light*u2
+    cosx=cosh(kz*width2)
+    sinx=I*sinh(kz*width2)
+  endif
+  f=0.5*conductivity(j)*speed_of_light*magnetic_permeability/sqrt(eps0)
+  phase_n=exp(-I*frequency/speed_of_light*u1*width1)
+  phase_p=exp(I*frequency/speed_of_light*u1*width1)
+  X=0.5D0*(Z1/Z2+Z2/Z1)
+  Y=0.5D0*(Z1/Z2-Z2/Z1)
+  Aplus=1.+2.*f*beta2
+  Aminus=1.-2.*f*beta2
+  B=2.*f*sinal*beta2
+  Cplus=2.*f*beta1+2.*f**2*beta1*beta2
+  Cminus=-2.*f*beta1+2.*f**2*beta1*beta2
+  D=2.*f**2*sinal*beta1*beta2
+  matrix(1,1)=(Aplus*cosx+I*(X+Cplus)*sinx)*phase_p
+  matrix(1,2)=(-B*cosx+I*(Y-D)*sinx)*phase_p
+  matrix(2,1)=(B*cosx-I*(Y-D)*sinx)*phase_n
+  matrix(2,2)=(Aminus*cosx-I*(X+Cminus)*sinx)*phase_n
+
+end subroutine
+
+end module
